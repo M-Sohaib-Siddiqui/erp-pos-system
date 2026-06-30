@@ -20,7 +20,14 @@ from app.schemas.auth import (
     TokenResponse,
     RefreshRequest,
     AccessTokenResponse,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    VerifyEmailRequest,
+    ResendVerificationRequest,
+    MessageResponse,
 )
+from app.core.security import create_email_verification_token, create_password_reset_token
+from app.services.email_service import send_verification_email, send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 security = HTTPBearer()
@@ -28,7 +35,6 @@ security = HTTPBearer()
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
-    # Check if email already exists
     result = await db.execute(select(User).where(User.email == user_data.email))
     existing_user = result.scalar_one_or_none()
 
@@ -42,15 +48,20 @@ async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
         email=user_data.email,
         hashed_password=hash_password(user_data.password),
         full_name=user_data.full_name,
-        role="owner",  # first user registering is treated as owner; refined in Phase 2
+        role="owner",
     )
 
     db.add(new_user)
     await db.flush()
     await db.refresh(new_user)
 
-    return new_user
+    verification_token = create_email_verification_token(str(new_user.id))
+    try:
+        send_verification_email(new_user.email, new_user.full_name, verification_token)
+    except Exception as e:
+        print(f"⚠️ Failed to send verification email: {e}")
 
+    return new_user
 
 @router.post("/login", response_model=TokenResponse)
 async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
@@ -130,3 +141,93 @@ async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+@router.post("/verify-email", response_model=MessageResponse)
+async def verify_email(body: VerifyEmailRequest, db: AsyncSession = Depends(get_db)):
+    payload = decode_token(body.token)
+
+    if payload is None or payload.get("type") != "email_verification":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification link",
+        )
+
+    user_id = payload.get("sub")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    if user.is_verified:
+        return MessageResponse(message="Email already verified")
+
+    user.is_verified = True
+    await db.flush()
+
+    return MessageResponse(message="Email verified successfully")
+
+
+@router.post("/resend-verification", response_model=MessageResponse)
+async def resend_verification(body: ResendVerificationRequest, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+
+    # Always return success even if user not found — prevents email enumeration
+    if user is None or user.is_verified:
+        return MessageResponse(message="If the account exists and is unverified, a new email has been sent")
+
+    verification_token = create_email_verification_token(str(user.id))
+    try:
+        send_verification_email(user.email, user.full_name, verification_token)
+    except Exception as e:
+        print(f"⚠️ Failed to send verification email: {e}")
+
+    return MessageResponse(message="If the account exists and is unverified, a new email has been sent")
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+
+    # Always return success even if user not found — prevents email enumeration
+    if user is None:
+        return MessageResponse(message="If the account exists, a password reset email has been sent")
+
+    reset_token = create_password_reset_token(str(user.id))
+    try:
+        send_password_reset_email(user.email, user.full_name, reset_token)
+    except Exception as e:
+        print(f"⚠️ Failed to send password reset email: {e}")
+
+    return MessageResponse(message="If the account exists, a password reset email has been sent")
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    payload = decode_token(body.token)
+
+    if payload is None or payload.get("type") != "password_reset":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset link",
+        )
+
+    user_id = payload.get("sub")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    user.hashed_password = hash_password(body.new_password)
+    await db.flush()
+
+    return MessageResponse(message="Password reset successfully")
