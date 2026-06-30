@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.core.redis import init_redis, close_redis
+from app.api.v1.endpoints import auth
 
 
 # Lifespan — runs on startup and shutdown
@@ -35,6 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/api/v1")
 
 # Health check endpoint
 @app.get("/health")

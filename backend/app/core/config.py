@@ -10,12 +10,14 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str
+    DATABASE_URL_LOCAL: str
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     POSTGRES_DB: str
 
     # Redis
     REDIS_URL: str
+    REDIS_URL_LOCAL: str
 
     # JWT
     SECRET_KEY: str

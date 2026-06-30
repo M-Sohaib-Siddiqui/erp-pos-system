@@ -11,7 +11,7 @@ async def get_redis():
 async def init_redis():
     global redis_client
     redis_client = await aioredis.from_url(
-        settings.REDIS_URL,
+        settings.REDIS_URL_LOCAL,
         encoding="utf-8",
         decode_responses=True,
     )

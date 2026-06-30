@@ -10,12 +10,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.config import settings
 from app.core.database import Base
+from app.models import user  # noqa: F401 — ensures models are registered with Base.metadata
 
 # Alembic config object
 config = context.config
 
 # Override sqlalchemy.url with value from .env
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL_LOCAL)
 
 # Logging
 if config.config_file_name is not None:
